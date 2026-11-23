@@ -1,0 +1,75 @@
+name: Twitter-Archiv bauen und veröffentlichen
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # Solange die Seite unter winfriedebner.github.io/twitterarchiv/ läuft: "twitterarchiv"
+  # Sobald twitterarchiv.winfried-ebner.de eingerichtet ist: leer lassen ("")
+  PATH_PREFIX: "twitterarchiv"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bilder und Videos aus früheren Läufen wiederverwenden
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache
+            img
+            video
+          key: medien-${{ github.run_id }}
+          restore-keys: medien-
+
+      - name: Programme installieren
+        run: npm install
+
+      - name: tweets.zip entpacken und vorbereiten
+        run: |
+          unzip -o database/tweets.zip -d database/
+          sed -i 's/^window\.YTD\.tweet\.part0 = /module.exports = /' database/tweets.js
+          head -c 60 database/tweets.js; echo
+
+      - name: Tweets importieren
+        run: npm run import
+
+      - name: Webseite bauen
+        run: |
+          if [ -n "$PATH_PREFIX" ]; then
+            npm run build -- --pathprefix="$PATH_PREFIX"
+          else
+            npm run build
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
